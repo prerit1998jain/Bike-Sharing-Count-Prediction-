@@ -1,0 +1,216 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(caTools)
+setwd("F:/Study Material/Semester 5/Regression and Time Series Model/RTSM_Project")
+hour = read.csv("hour.csv", stringsAsFactors = FALSE)
+
+```
+
+Creating a dataframe which consist of day wise entries.
+```{r}
+library(dplyr)
+by_user = group_by(hour, dteday)
+names(hour)
+day  = summarize(by_user, 
+                           temp = mean(temp),
+                          atemp = mean(atemp),
+                          hum = mean(hum),
+                          windspeed = mean(windspeed),
+                 casual = sum(casual),
+                 registered = sum(registered),
+                 cnt = sum(cnt),
+                 season = (mean(season)),
+                 holiday = (mean(holiday)),
+                 weekday = (mean(weekday)),
+                 mnth = (mean(mnth)),
+                 yr = (mean(yr)),
+                 weathersit = round(mean(weathersit),0),
+                 workingday = mean(workingday))
+summary(day)
+
+
+```
+
+Changing the categorical variables into factor datatype so that the dummy variables can be generated while performing regression analysis.
+```{r}
+str(hour)
+summary(hour)
+hour$season = as.factor(hour$season)
+hour$hr = as.factor(hour$hr)
+hour$yr = as.factor(hour$yr)
+hour$holiday = as.factor(hour$holiday)
+hour$weekday = as.factor(hour$weekday)
+hour$workingday = as.factor(hour$workingday)
+hour$mnth = as.factor(hour$mnth)
+hour$weathersit = as.factor(hour$weathersit)
+
+day$season = as.factor(day$season)
+day$yr = as.factor(day$yr)
+day$holiday = as.factor(day$holiday)
+day$weekday = as.factor(day$weekday)
+day$workingday = as.factor(day$workingday)
+day$mnth = as.factor(day$mnth)
+day$weathersit = as.factor(day$weathersit)
+summary(day)
+``{r}
+
+```
+
+
+Now we will check the skewness of outcome variables. The skewness is calculated by the skewness function in the package "e1071". The skewness for the cnt variable i.e the outcome variable for hourly data came out to be 1.277191, which tells us that data is highly positively skewed. So, inorder to minimize the skewness and dispersion of the data, logarithmic transformation and normalization are performed on the outcome variable of hourly data. 
+On the other hand the daily data had a skewness of -0.04715862. Which is an evidence of weak skewness on the negative side. and hence only normalization is performed in this case.
+```{r}
+library(e1071)
+skewness(hour$cnt)
+skewness(day$cnt)
+
+hist(((hour$cnt)),breaks = 10)
+hist(day$cnt)
+
+hour$log_cnt = log(hour$cnt)
+hour$norm_log_cnt = (hour$log_cnt - min(hour$log_cnt))/(max(hour$log_cnt)-min(hour$log_cnt))
+day$norm_cnt = (day$cnt - min(day$cnt))/(max(day$cnt) - min(day$cnt))
+plot(hour$temp,hour$atemp)
+
+```
+
+Multiple linear regression model is trained over the hourly data as well as daily data. First of all I have considered a model consisting of all the variables as independent variables except the outcome variable cnt. After checking the correlation matrix we found out some of the variables were highly correlated and hence one of them is considered into the model in order to improve the quality of the model.
+Finally I used the step function available in R and found the best adjusted R square value of 0.8235.
+```{r}
+relation = norm_log_cnt ~ season + yr + mnth + hr + holiday + weekday + workingday + weathersit + temp + atemp + hum + windspeed
+
+
+model_0 = lm(relation, data = hour[1:nrow(hour),])
+summary(model_0)
+model = step(model_0)
+summary(model)
+
+relation_3 = norm_cnt ~ season + yr + mnth + holiday + weekday + weathersit+ workingday + temp + atemp + hum + windspeed
+model_3 = lm(relation_3, data = day)
+summary(model_3)
+model_day = step(model_3)
+summary(model_day)
+```
+
+Performing the Residual Analysis 
+
+
+```{r}
+
+library(stdres)
+hist(model$residuals, breaks = 100)
+hist(model_day$residuals, breaks = 100)
+
+plot(predict(model), model_1$residuals)
+plot(predict(model_day), model_day$residuals)
+
+qqnorm(model$residuals)
+qqline(model$residuals)
+
+qqnorm(model_day$residuals)
+qqline(model_day$residuals)
+
+```
+
+Performing Time Series Analysis for day-wise data
+```{r}
+library('ggplot2')
+library('forecast')
+library('tseries')
+
+
+# Converting Dates to the Date datatype
+day$Date = as.Date(day$dteday)
+
+# plotting the Daily Bike checkouts with date
+ggplot(day, aes(Date, cnt)) + geom_line() + scale_x_date('month') + ylab('Daily Bike Checkouts') +
+  xlab("")
+
+
+```
+
+```{r}
+# removing timeseries outliers from the data
+count_ts = ts(day[,c('cnt')])
+day$clean_cnt = tsclean(count_ts)
+ggplot() +geom_line(data = day, aes(x = Date,y = clean_cnt))+ ylab('Clean Bike Count')
+
+```
+
+```{r}
+# fitting an imaginary line through the dataset using moving averages
+# Weekly MA
+day$cnt_ma = ma(day$clean_cnt, order = 7)
+# Monthly MA
+day$cnt_ma30 = ma(day$clean_cnt, order = 30)
+#plotting the line 
+ggplot() + 
+ geom_line(data = day, aes(x = Date, y = cnt_ma, color = "Weekly moving average")) +
+ geom_line(data = day, aes(x = Date, y = cnt_ma30, color = "Monthly Moving average")) +
+ ylab("Bicycle count")
+```
+
+```{r}
+#Decomposition of the Data
+
+  #storing the smoothed dataset in a timeseries 
+count_ma = ts(na.omit(day$cnt_ma), frequency = 30)
+  # Decomposing the timeseries
+decomp = stl(count_ma, s.window = 'periodic')
+  # deseasonalizing the time series data
+deseasonal_cnt <- seasadj(decomp)
+plot(deseasonal_cnt)
+plot(decomp)
+
+```
+
+```{r}
+# Stationarity Test
+# Performing Augmented Dickey Fuller Test
+adf.test(count_ma, alternative = "stationary")
+
+#Plotting ACF and PACF plots
+Acf(count_ma,main = '')
+Pacf(count_ma,main="")
+
+#differencing
+count_d1 = diff(deseasonal_cnt, differences = 1)
+plot(count_d1)
+adf.test(count_d1, alternative = "stationary")
+
+```
+
+```{r}
+#Using Auto Arima to determine the orders of time series
+auto.arima(deseasonal_cnt, seasonal = FALSE)
+
+#Evaluation and Iteration
+fit = auto.arima(deseasonal_cnt, seasonal = FALSE)
+tsdisplay(residuals(fit), lag.max = 45, main = '(1,1,1) Model Residuals')
+
+fit_2 = arima(x = deseasonal_cnt, order = c(1,1,7))
+tsdisplay(residuals(fit_2), lag.max = 45, main = '(1,1,7) Model Residuals')
+fit_2
+
+```
+
+```{r}
+#forecasting using the fitted model
+fcast = forecast(fit_2, h = 30)
+fcast
+plot(fcast)
+i = 0
+sse = 0
+for (i in range(1:30)) {
+    sse = sse + power((fcast$mean[i]-deseasonal_cnt[i]),2)
+}
+```
+
